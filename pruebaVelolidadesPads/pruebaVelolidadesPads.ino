@@ -10,10 +10,10 @@ int vel=0;
 //Temporizadoor de intervaloz
 unsigned long golpeAnterior1 = 0;
 unsigned long golpeActual1   = 0;
-const long intervGolpes1 = 40;
+const long intervGolpes1 = 30;
 
-int thrMin = 8;
-int thrMax = 25;
+int thrMin = 4;
+int thrMax = 15;
 
 
 float velocidad;
@@ -57,8 +57,7 @@ void loop() {
     if(golpeActual1 >= golpeAnterior1 + intervGolpes1){
       vel = VelGolpe(vPad1Ant); //Valor máximo alcanzado , numero de pad
       //MIDI.sendControlChange(40 , vel, 1);
-      MIDI.sendNoteOn(40, 127 , 1);
-      delay(5);
+      MIDI.sendNoteOn(68, vel , 1);
       //MIDI.sendNoteOff(40, 127 , 1);
       golpeAnterior1 = golpeActual1;
     }
