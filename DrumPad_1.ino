@@ -1,5 +1,5 @@
 #include <LiquidCrystal.h>		// importa libreria
-
+#include <MIDI.h>
 //LCD
 const int rs = 5, en = 6, d4 = 7, d5 = 8, d6 = 9, d7 = 10;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
@@ -7,37 +7,46 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 //ENDODER
 #define A 2 //CLK
 #define B 3 //DT
+#define GolpeMax 13 //velocidad a 127
 #define boton1 12 //Up
 #define boton2 11 //Down
+#define PAD1   0  //A0
 int KEY_ANT = 0;	//Guarda el key anterior
 //VARIABLES
 volatile int KEY = 0;// 0 - 255, 0 = C-2 (Do -2) //volatile, que se usa en el atach
 String Notas[12] = {"C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B "};
 String NOTA =  ""; 
 int OCTAVA = -2; //DE -2 A 8
+int voltIn;
+int thrMin = 10;
+int thrMax = 70;
 
 //Auxiliares
 bool botPulsado = false;
-//////////  SETUP   ////////////
+//////////  SETUP   //////////////////
 void setup() {
   //INICIALIZACIÓN
   lcd.begin(16, 2);
-  
-  pinMode(A, INPUT);		  // A como entrada
-  pinMode(B, INPUT);		  // B como entrada
+  Serial.begin(115200);
+  pinMode(A, INPUT);
+  pinMode(B, INPUT);
   pinMode(boton1, INPUT);
   pinMode(boton2, INPUT); 
+  pinMode(GolpeMax, INPUT);
 
   attachInterrupt(digitalPinToInterrupt(A), encoder, LOW);// interrupcion sobre pin A con low
   //START
   lcd.clear();
   delay(200);
   NOTA =  Notas[KEY];
-  pantalla();
+  Pantalla();
 }
 ////////////  LOOP  //////////////
 void loop() {
-
+  voltIn = analogRead(PAD1); 
+  if(voltIn > 5){
+    Serial.println(voltIn);
+  } 
   //Botones 1 y 2, detección de pulso.
   if(digitalRead(boton1) == HIGH  && botPulsado == false){
     if (KEY <= 115){KEY = KEY + 12;}
@@ -71,14 +80,28 @@ void encoder()  {
     }
     KEY = min(127, max(0, KEY));	// 0-127 
     ultimaInterrupcion = tiempoInterrupcion;
-    
-
     LCD_refresh();
 
   }
 }
+///// FUNCION PARA CAL. LA VELOCIDAD
+int VelGolpe(int valorPad, int Pad) {
 
-void pantalla(){
+  //valorPad = valorPad * 0.0977517106549365 ; //acondicionamos la señal
+
+  if (interrup == HIGH) {
+    numerador = valorPad - (thrMin[Pad]*10.23);
+    denominador = (thrMax[Pad] - thrMin[Pad]) * 10.23;
+    if (numerador > 0) {velocidad = (numerador * 127) / denominador;}
+    else {velocidad = 0;}
+  }
+  else {velocidad = 127;}
+  
+  if (velocidad > 127) velocidad = 127;
+
+  return velocidad;
+}
+void Pantalla(){
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(" N ");
