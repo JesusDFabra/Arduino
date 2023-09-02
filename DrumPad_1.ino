@@ -1,11 +1,17 @@
-//Test para probar velocidad de golpe
+/*Electronic Drum MIDI
+ * para 1 Pad.
+ * 
+ * por: Jesus David Fabra Tapias
+ * Medellín-Colombia
+ * Sep-02-2023
+*/
 #include <MIDI.h>
 #include <EEPROM.h>
 #include <LiquidCrystal.h>  // importa libreria
 
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-#define PAD1 0
+#define PAD1 0     //A0
 #define A 2        //CLK
 #define B 3        //DT
 #define botonE 4   //boton encoder
@@ -39,10 +45,12 @@ const int memoryThrMax = 1014;
 int thrMin = EEPROM.read(memoryThrMin);
 int thrMax = EEPROM.read(memoryThrMax);
 int KEY = EEPROM.read(memoryKEY);  // 0 - 255, 0 = C-2 (Do -2) //volatile, que se usa en el atach
-int KEY_ANT = 0;                   //Guarda el key anterior
+
+
+int KEY_ANT = 0;  //Guarda el key anterior
 String Notas[12] = { "C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B " };
 String NOTA = "";
-int OCTAVA = -2;  //DE -2 A 8
+int OCTAVA;  //DE -2 A 8
 
 //velocidad del pad (voltaje de entrada)
 int vPad1, vPad1Ant = 0;
@@ -83,7 +91,6 @@ void setup() {
   pinMode(boton1, INPUT_PULLUP);
   pinMode(boton2, INPUT_PULLUP);
   pinMode(botonE, INPUT_PULLUP);  // boton Encoder
-
   //LOGO
   lcd.createChar(0, logo1);
   lcd.createChar(1, logo2);
@@ -95,26 +102,26 @@ void setup() {
   lcd.createChar(6, barra);
   lcd.createChar(7, H);
 
-
   //MIDI.begin(); //iniciamos transmicion Midi.
   attachInterrupt(digitalPinToInterrupt(A), encoderA, CHANGE);  // interrupcion sobre pin A con Falling
   //attachInterrupt(digitalPinToInterrupt(B), encoderB, RISING);
 
-  /////////////////START
+  //Para la primera ejecución en un nuevo arduino.
+  if (thrMin < 0 || thrMin >= thrMax) { thrMin = 5; }
+  if (thrMax <= thrMin || thrMax > 100) { thrMin = 25; }
+  if (KEY < 0 || KEY > 127) { KEY = 0; }
+
+  /////////////////  S T A R T  //////////////////////
   lcd.clear();
   delay(200);
   lcd.setCursor(2, 0);
   lcd.write(byte(0));
-  lcd.setCursor(3, 0);
   lcd.write(byte(1));
-  lcd.setCursor(4, 0);
   lcd.write(byte(2));
 
   lcd.setCursor(2, 1);
   lcd.write(byte(3));
-  lcd.setCursor(3, 1);
   lcd.write(byte(4));
-  lcd.setCursor(4, 1);
   lcd.write(byte(5));
 
   delay(800);
@@ -125,6 +132,8 @@ void setup() {
   delay(1600);
   lcd.clear();
   delay(300);
+
+
 
   opc = 0;
   NOTA = Notas[KEY % 12];
@@ -166,6 +175,7 @@ void loop() {
       LCD_refresh();
       botPulsado = true;
     }
+    guardando = true;
   } else if (digitalRead(boton2) == HIGH && botPulsado == false) {
     if (opc == 0) {
       if (KEY >= 12) {
@@ -180,6 +190,7 @@ void loop() {
       LCD_refresh();
       botPulsado = true;
     }
+    guardando = true;
   } else if (digitalRead(boton2) == LOW && digitalRead(boton1) == LOW && digitalRead(botonE) != LOW && botPulsado == true) {
     botPulsado = false;
   }
@@ -232,8 +243,7 @@ int VelGolpe(int valorPad) {
     } else {
       velocidad = 0;
     }
-  } 
-  else {
+  } else {
     velocidad = 127;
   }
 
