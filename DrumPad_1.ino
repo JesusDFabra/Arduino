@@ -1,14 +1,16 @@
 //Test para probar velocidad de golpe
 #include <MIDI.h>
-#include <LiquidCrystal.h>		// importa libreria
+#include <EEPROM.h>
+#include <LiquidCrystal.h>  // importa libreria
+
 MIDI_CREATE_DEFAULT_INSTANCE();
 
 #define PAD1 0
-#define A 3 //CLK
-#define B 4 //DT
-#define botonE 2 //boton encoder
-#define boton1 12 //Up
-#define boton2 11 //Down
+#define A 2        //CLK
+#define B 3        //DT
+#define botonE 4   //boton encoder
+#define boton1 12  //Up
+#define boton2 11  //Down
 
 //LCD
 const int rs = 5, en = 6, d4 = 7, d5 = 8, d6 = 9, d7 = 10;
@@ -24,39 +26,53 @@ byte logo4[8] = { B01000, B01000, B01000, B00100, B00100, B00010, B00001, B00000
 byte logo5[8] = { B01011, B01010, B01010, B01010, B01010, B01010, B01010, B11011 };
 byte logo6[8] = { B00010, B00010, B00010, B00100, B00100, B01000, B10000, B00000 };
 
-byte barra[8] = { B10000, B10000, B10000, B10000, B10000, B10000, B10000, B10000 }; //Separador
-byte H[8] = { B11111, B11111, B11111, B11111, B11111, B11111, B11111, B11111 }; //Espacio lleno
+byte barra[8] = { B10000, B10000, B10000, B10000, B10000, B10000, B10000, B10000 };  //Separador
+byte H[8] = { B11111, B11111, B11111, B11111, B11111, B11111, B11111, B11111 };      //Espacio lleno
 
 
-
-//Temporizadoor de intervaloz
-unsigned long golpeAnterior1 = 0;
-unsigned long golpeActual1   = 0;
-const long intervGolpes1     = 30; //milis
+//Memoria EEPROM
+const int memoryKEY = 1012;
+const int memoryThrMin = 1013;
+const int memoryThrMax = 1014;
 
 //VARIABLES
-volatile int KEY = 0;// 0 - 255, 0 = C-2 (Do -2) //volatile, que se usa en el atach
-int          KEY_ANT = 0;	//Guarda el key anterior
-String Notas[12] = {"C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B "};
-String NOTA =  ""; 
-int OCTAVA = -2; //DE -2 A 8
+int thrMin = EEPROM.read(memoryThrMin);
+int thrMax = EEPROM.read(memoryThrMax);
+int KEY = EEPROM.read(memoryKEY);  // 0 - 255, 0 = C-2 (Do -2) //volatile, que se usa en el atach
+int KEY_ANT = 0;                   //Guarda el key anterior
+String Notas[12] = { "C ", "C#", "D ", "D#", "E ", "F ", "F#", "G ", "G#", "A ", "A#", "B " };
+String NOTA = "";
+int OCTAVA = -2;  //DE -2 A 8
 
 //velocidad del pad (voltaje de entrada)
 int vPad1, vPad1Ant = 0;
 bool botPulsado = false;
 bool calculando = false;
-int vel=0;
-bool entradaA,entradaB;
+int vel = 0;
+bool entradaA, entradaB;
 bool opc, opcThr = 0;
 
-//Thresholds
-int thrMin = 4;
-int thrMax = 15;
+//EEPROM.write(1013,4); //Guardar en EEPROM
+//EEPROM.write(1014,8); //Guardar en EEPROM
 
+//Temporizador de escritura EEPROM
+static unsigned long escrituraAnte = 0;
+unsigned long escrituraAct = 0;
+const long tiempoEntraEscrit = 5000;  //milis
+bool guardando = false;
+
+//Temporizadoor de intervaloz
+static unsigned long golpeAnterior1 = 0;
+unsigned long golpeActual1 = 0;
+const long intervGolpes1 = 30;  //milis
+//temporitador Encoder
+static unsigned long ultimaInterrupcion = 0;
+unsigned long tiempoInterrupcion = 0;
+int intervaloInterrupcion = 200;  //milisegundos
 
 //Var en funciones
 float velocidad;
-unsigned long numerador,denominador;
+unsigned long numerador, denominador;
 
 void setup() {
   // put your setup code here, to run once:
@@ -64,9 +80,9 @@ void setup() {
   Serial.begin(115200);
   pinMode(A, INPUT);
   pinMode(B, INPUT);
-  pinMode(boton1, INPUT_PULLUP); 
-  pinMode(boton2, INPUT_PULLUP); 
-  pinMode(botonE, INPUT_PULLUP); // boton Encoder
+  pinMode(boton1, INPUT_PULLUP);
+  pinMode(boton2, INPUT_PULLUP);
+  pinMode(botonE, INPUT_PULLUP);  // boton Encoder
 
   //LOGO
   lcd.createChar(0, logo1);
@@ -81,9 +97,8 @@ void setup() {
 
 
   //MIDI.begin(); //iniciamos transmicion Midi.
-  attachInterrupt(digitalPinToInterrupt(A), encoderA, LOW);// interrupcion sobre pin A con low
-  attachInterrupt(digitalPinToInterrupt(botonE), BotonEncoder, LOW);// interrupcion sobre pin A con low
-
+  attachInterrupt(digitalPinToInterrupt(A), encoderA, CHANGE);  // interrupcion sobre pin A con Falling
+  //attachInterrupt(digitalPinToInterrupt(B), encoderB, RISING);
 
   /////////////////START
   lcd.clear();
@@ -112,53 +127,72 @@ void setup() {
   delay(300);
 
   opc = 0;
-  NOTA = Notas[KEY%12];
+  NOTA = Notas[KEY % 12];
   OCTAVA = (KEY / 12) - 2;
   PantallaMain();
-
 }
 
 void loop() {
+  if (guardando) {
+    escrituraAct = millis();
+    if (escrituraAct - escrituraAnte > tiempoEntraEscrit) {
+      if (opc == 0) {
+        EEPROM.write(memoryKEY, KEY);
+      } else {
+        EEPROM.write(memoryThrMin, thrMin);  //Guardar en EEPROM
+        EEPROM.write(memoryThrMax, thrMax);  //Guardar en EEPROM
+      }
+    }
+    guardando = false;
+  }
+  if (digitalRead(botonE) == LOW && botPulsado == false) {
+    opc = !opc;
+    botPulsado = true;
+
+    LCD_refresh();
+  }
   //Botones 1 y 2, detección de pulso.
-  if(digitalRead(boton1) == HIGH  && botPulsado == false){
-    if(opc==0){
-      if (KEY <= 115){KEY = KEY + 12;}
-      else{KEY = 127;}
+  if (digitalRead(boton1) == HIGH && botPulsado == false) {
+    if (opc == 0) {
+      if (KEY <= 115) {
+        KEY = KEY + 12;
+      } else {
+        KEY = 127;
+      }
       LCD_refresh();
       botPulsado = true;
-    }
-    else{
+    } else {
       opcThr = 0;
       LCD_refresh();
       botPulsado = true;
     }
-  }
-  else if(digitalRead(boton2) == HIGH && botPulsado == false){
-    if(opc==0){
-      if (KEY >= 12){KEY = KEY - 12;}
-      else{KEY = 0;} 
+  } else if (digitalRead(boton2) == HIGH && botPulsado == false) {
+    if (opc == 0) {
+      if (KEY >= 12) {
+        KEY = KEY - 12;
+      } else {
+        KEY = 0;
+      }
       LCD_refresh();
       botPulsado = true;
-    }
-    else{
+    } else {
       opcThr = 1;
       LCD_refresh();
       botPulsado = true;
     }
-  }
-  else if (digitalRead(boton2) == LOW && digitalRead(boton1) == LOW && digitalRead(botonE) != LOW && botPulsado == true){
+  } else if (digitalRead(boton2) == LOW && digitalRead(boton1) == LOW && digitalRead(botonE) != LOW && botPulsado == true) {
     botPulsado = false;
   }
 
   vPad1 = analogRead(PAD1);
 
-  if (vPad1 <= (thrMin*10.23)) {
+  if (vPad1 <= (thrMin * 10.23)) {
     vPad1Ant = thrMin * 10.23;
   }
 
   while (vPad1 > vPad1Ant) {
     calculando = true;
-    
+
     vPad1Ant = vPad1;
     vPad1 = analogRead(PAD1);
     /*
@@ -178,82 +212,99 @@ void loop() {
     calculando = false;
     golpeActual1 = millis();
 
-    if(golpeActual1 >= golpeAnterior1 + intervGolpes1){
-      vel = VelGolpe(vPad1Ant); //Valor máximo alcanzado , numero de pad
+    if (golpeActual1 >= golpeAnterior1 + intervGolpes1) {
+      vel = VelGolpe(vPad1Ant);  //Valor máximo alcanzado , numero de pad
       //MIDI.sendControlChange(40 , vel, 1);
-      MIDI.sendNoteOn(KEY, vel , 1);
+      MIDI.sendNoteOn(KEY, vel, 1);
       //MIDI.sendNoteOff(40, 127 , 1);
       golpeAnterior1 = golpeActual1;
     }
   }
 }
 
-
 ///// FUNCION PARA CAL. LA VELOCIDAD
 int VelGolpe(int valorPad) {
-  if (1) {
-    numerador = valorPad - (thrMin*10.23);
+  if (digitalRead(13) == LOW) {
+    numerador = valorPad - (thrMin * 10.23);
     denominador = (thrMax - thrMin) * 10.23;
-    if (numerador > 0) {velocidad = (numerador * 127) / denominador;}
-    else {velocidad = 0;}
+    if (numerador > 0) {
+      velocidad = (numerador * 127) / denominador;
+    } else {
+      velocidad = 0;
+    }
+  } 
+  else {
+    velocidad = 127;
   }
-  else {velocidad = 127;}
-  
+
+
   if (velocidad > 127) velocidad = 127;
 
   return velocidad;
 }
 
-void encoderA()  {
-  static unsigned long ultimaInterrupcion = 0;
-  unsigned long tiempoInterrupcion = millis();
-  if (tiempoInterrupcion - ultimaInterrupcion > 5) {	// rutina antirebote desestima
-    if (digitalRead(B) != LOW)			// si B es HIGH, sentido horario
+void encoderA() {
+  tiempoInterrupcion = millis();
+  if (tiempoInterrupcion - ultimaInterrupcion > intervaloInterrupcion) {  // rutina antirebote desestima
+    if (digitalRead(B) != digitalRead(A))                                 // si B es HIGH, sentido horario
     {
-      if(opc == 0){
+      if (opc == 0) {
         KEY++;
-      }
-      else if(opcThr == 0 && thrMin < 100 && thrMin < thrMax-1){
+      } else if (opcThr == 0 && thrMin < 100 && thrMin < thrMax - 1) {
         thrMin++;
-      }
-      else if(opcThr == 1 && thrMax < 100){
+      } else if (opcThr == 1 && thrMax < 100) {
         thrMax++;
       }
-      
-    }
-    else {
-      if (opc == 0){
+    } else {
+      if (opc == 0) {
         KEY--;
-      }
-      else if(opcThr == 0 && thrMin > 0){
+      } else if (opcThr == 0 && thrMin > 0) {
         thrMin--;
-      }
-      else if(opcThr == 1 && thrMax > 0 && thrMax > thrMin + 1){
+      } else if (opcThr == 1 && thrMax > 0 && thrMax > thrMin + 1) {
         thrMax--;
       }
+    }
+    KEY = min(127, max(0, KEY));  // 0-127
+    ultimaInterrupcion = tiempoInterrupcion;
+    LCD_refresh();
+  }
+  guardando = true;
+}
+/*
+void encoderB()  {
+  tiempoInterrupcion = millis();
+  if (tiempoInterrupcion - ultimaInterrupcion > intervaloInterrupcion) {	// rutina antirebote desestima
+    if (digitalRead(A) == digitalRead(B))			// si B es HIGH, sentido horario
+    {
+      if(opc == 0){KEY++;}
+      else if(opcThr == 0 && thrMin < 100 && thrMin < thrMax-1){thrMin++;}
+      else if(opcThr == 1 && thrMax < 100){thrMax++;}
+    }
+    else {
+      if (opc == 0){KEY--;}
+      else if(opcThr == 0 && thrMin > 0){thrMin--;}
+      else if(opcThr == 1 && thrMax > 0 && thrMax > thrMin + 1){thrMax--;}
     }
     KEY = min(127, max(0, KEY));	// 0-127 
     ultimaInterrupcion = tiempoInterrupcion;
     LCD_refresh();
-
   }
-
 }
-
-void LCD_refresh(){
-  NOTA = Notas[KEY%12];
+*/
+void LCD_refresh() {
+  NOTA = Notas[KEY % 12];
   OCTAVA = (KEY / 12) - 2;
 
-  if(opc==0){
+  if (opc == 0) {
     opcThr = 0;
     //Flechas
     lcd.setCursor(0, 0);
-    lcd.write(126);    //arrow
+    lcd.write(126);  //arrow
     lcd.setCursor(9, 1);
     lcd.print(" ");
     lcd.setCursor(9, 0);
     lcd.print(" ");
-    //Variables 
+    //Variables
     lcd.setCursor(3, 0);
     lcd.print(NOTA);
     lcd.setCursor(6, 0);
@@ -264,26 +315,24 @@ void LCD_refresh(){
     lcd.print("  ");
     lcd.setCursor(3, 1);
     lcd.print(KEY);
-  }
-  else{
+  } else {
     lcd.setCursor(0, 0);
     lcd.print(" ");
-    if (opcThr == 0){
+    if (opcThr == 0) {
       lcd.setCursor(9, 1);
       lcd.print(" ");
       lcd.setCursor(9, 0);
+    } else {
+      lcd.setCursor(9, 0);
+      lcd.print(" ");
+      lcd.setCursor(9, 1);
     }
-    else{
-      lcd.setCursor(9, 0);
-      lcd.print(" ");
-      lcd.setCursor(9, 1);
-    }  
-    lcd.write(126);    //arrow
-    if(thrMin < 10){
+    lcd.write(126);  //arrow
+    if (thrMin < 10) {
       lcd.setCursor(15, 0);
       lcd.print("  ");
     }
-    if(thrMax < 10){
+    if (thrMax < 10) {
       lcd.setCursor(15, 1);
       lcd.print("  ");
     }
@@ -296,11 +345,11 @@ void LCD_refresh(){
     lcd.print("%");
   }
 }
-void PantallaMain(){
+void PantallaMain() {
   lcd.clear();
   //Note & Key
   lcd.setCursor(0, 0);
-  lcd.write(126);    //arrow
+  lcd.write(126);  //arrow
   lcd.setCursor(1, 0);
   lcd.print("N ");
   lcd.print(NOTA);
@@ -312,9 +361,9 @@ void PantallaMain(){
   lcd.print(KEY);
 
   //Barra separadora
-  lcd.setCursor(8,0);
+  lcd.setCursor(8, 0);
   lcd.write(byte(6));
-  lcd.setCursor(8,1);
+  lcd.setCursor(8, 1);
   lcd.write(byte(6));
   //thresholds
   lcd.setCursor(10, 0);
@@ -325,12 +374,4 @@ void PantallaMain(){
   lcd.print("T+ ");
   lcd.print(thrMax);
   lcd.print("%");
-}
-
-void BotonEncoder(){
-  if(botPulsado == false){
-    opc = !opc;
-    botPulsado = true; 
-    LCD_refresh();
-  }
 }
