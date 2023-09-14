@@ -72,12 +72,17 @@ bool guardando = false;
 //Temporizadoor de intervalo golpes
 static unsigned long golpeAnterior1 = 0;
 unsigned long golpeActual1 = 0;
-const long intervGolpes1 = 45;  //milis
+const long intervGolpes1 = 30;  //milis
 
 //temporitador Encoder o pulsadores
 static unsigned long ultimaInterrupcion = 0;
 unsigned long tiempoInterrupcion = 0;
-int intervaloInterrupcion = 50;  //milisegundos
+int intervaloInterrupcion = 45;  //milisegundos
+
+//temporitador Rebote
+static unsigned long ultimoRebote = 0;
+unsigned long tiempoRebote = 0;
+int intervaloRebotes = 25;  //entre rebotes
 
 //Var en funciones
 float velocidad;
@@ -142,23 +147,22 @@ void loop() {
     teclaPresionada = false;
   }
   flagAnt = LED;
-  LED = digitalRead(13); 
-  if(flagAnt != LED){
-    if(LED == false){
+  LED = digitalRead(13);
+  if (flagAnt != LED) {
+    if (LED == false) {
       thrMin = EEPROM.read(memoryThrMin);
       thrMax = EEPROM.read(memoryThrMax);
-    }else {
+    } else {
       thrMin = EEPROM.read(memoryThrMin) * 2;
       thrMax = EEPROM.read(memoryThrMax) * 2;
+      if(thrMax > 100) thrMax = 100;
     }
     flagSensib = true;
     LCD_refresh();
     flagSensib = false;
   }
 
-  if (guardando) {
-    Guardar();
-  }
+  if (guardando) Guardar();
   if (digitalRead(botonE) == LOW && botPulsado == false) {
     opc = !opc;
     botPulsado = true;
@@ -198,13 +202,19 @@ void loop() {
   vPad1Ant = vPad1;
   vPad1 = analogRead(PAD1);
 
-  if (vPad1 > 50) Imprime();
+  if (vPad1 > 100) Imprime();
 
   if (vPad1 > thrMin * 10.23) {
     CalculoGolpe();
   } else {
-    //vPad1Ant = thrMin * 10.23;
-    Max = 0;
+    Max = 0;  //listo para otro rebote
+    /*if(Max > 0){
+      tiempoRebote = millis();
+      if (tiempoRebote - ultimoRebote > intervaloRebotes) {
+        Max = 0;
+      }
+    ultimoRebote = tiempoRebote;
+    }*/
   }
 }
 
@@ -214,23 +224,22 @@ void CalculoGolpe() {
   int contCalculos = 0;
   golpeActual1 = millis();
 
-  if (Max == 0 && (golpeActual1 - golpeAnterior1 > intervGolpes1)) {
-    if (vPad1 > vPad1Ant+35) {
+  if (Max == 0 && (golpeActual1 - golpeAnterior1 > intervGolpes1) && (vPad1 - vPad1Ant) > 50) {
+    if (vPad1 >= vPad1Ant) {
       calculando = 1;
       vel = 0;
-      
     }
-    while (calculando == 1 && vPad1 >= vPad1Ant && contBajas < 3 && contCalculos <= 1) {
+    while (vPad1 >= vPad1Ant && contBajas < 3 && contCalculos <= 2) {
       vPad1Ant = vPad1;
       vPad1 = analogRead(PAD1);
       if (vPad1 < vPad1Ant) {
-        if (Max <= vPad1Ant && MaxAnterior <= Max) {
-          MaxAnterior = Max;
+        if (Max <= vPad1Ant) {
+          //MaxAnterior = Max;
           Max = vPad1Ant;
         }
-        if(vPad1>0){
-          vPad1Ant = vPad1-1;
-        }else{
+        if (vPad1 > 0) {
+          vPad1Ant = vPad1 - 1;
+        } else {
           vPad1Ant = 0;
         }
         contBajas++;
@@ -242,13 +251,18 @@ void CalculoGolpe() {
       Imprime();
     }
     //si entró al while
-    if (calculando == 1 ) {
+    if (calculando == 1) {
       calculando = 0;
-      vel = VelGolpe(Max);  //Valor máximo alcanzado , numero de pad
-      MIDI.sendNoteOn(KEYS[nPAD - 1], vel, 1);
+      if(Max * 2 >= MaxAnterior){
+        vel = VelGolpe(Max);  //Valor máximo alcanzado , numero de pad
+        if (vel > 10 ) MIDI.sendNoteOn(KEYS[nPAD - 1], vel, 1);
+      }
       //MIDI.sendNoteOff(KEY, vel , 1);
       Imprime();
       MaxAnterior = Max;
+      Max = 0;
+      vel = 0;
+      Imprime();
     }
     golpeAnterior1 = golpeActual1;  //intervalos de golpes
   }
@@ -265,8 +279,7 @@ int VelGolpe(int valorPad) {
     } else {
       velocidad = 0;
     }
-  }
-  else{
+  } else {
     velocidad = 127;
   }
   return velocidad;
@@ -344,8 +357,8 @@ void LCD_refresh() {
       lcd.setCursor(9, 1);
     }
     lcd.write(byte(7));  //arrow
-  } 
-  if(opc == 1 || flagSensib == true) {
+  }
+  if (opc == 1 || flagSensib == true) {
     if (tMin < 10) {
       lcd.setCursor(15, 0);
       lcd.print("  ");
@@ -359,7 +372,7 @@ void LCD_refresh() {
     lcd.print("%");
     lcd.setCursor(13, 1);
     lcd.print(tMax);
-    lcd.print("%"); 
+    lcd.print("%");
   }
 }
 void PantallaMain() {
@@ -431,20 +444,19 @@ void Guardar() {
     if (opc == 0) {
       EEPROM.write(memoryKEY[nPAD - 1], KEYS[nPAD - 1]);
     } else {
-      if (LED){
-        EEPROM.write(memoryThrMin, thrMin/2);  //Guardar en EEPROM
-        EEPROM.write(memoryThrMax, thrMax/2);  //Guardar en EEPROM
-      }else{
+      if (LED) {
+        EEPROM.write(memoryThrMin, thrMin / 2);  //Guardar en EEPROM
+        EEPROM.write(memoryThrMax, thrMax / 2);  //Guardar en EEPROM
+      } else {
         EEPROM.write(memoryThrMin, thrMin);  //Guardar en EEPROM
         EEPROM.write(memoryThrMax, thrMax);  //Guardar en EEPROM
       }
-      
     }
   }
   guardando = false;
 }
 void Imprime() {
-  if (1) {
+  if (0) {
     Serial.print("Lectura Pad1:");
     Serial.print(vPad1);
     Serial.print("\t");
@@ -454,13 +466,12 @@ void Imprime() {
     Serial.print("Max:");
     Serial.print(Max);
     Serial.print("\t");
-    Serial.print("MaxAnterior:");
-    Serial.print(MaxAnterior);
+    Serial.print("Tiempo:");
+    Serial.print(golpeActual1 - golpeAnterior1);
     Serial.print("\t");
     Serial.print("thrMin:");
     Serial.print(thrMin * 10.23);
     Serial.print("\t");
-
     Serial.print("Velovicad:");
     Serial.println(vel);
   }
